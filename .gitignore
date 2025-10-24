@@ -56,3 +56,7 @@ target/
 
 # SimSpark
 Linux*
+
+# Secrets
+secret_key
+secret_key.pub
