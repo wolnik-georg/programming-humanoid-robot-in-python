@@ -19,15 +19,15 @@
     # preceding the point, the second describes the curve following the point.
 """
 
-from pid import PIDAgent
 from keyframes import (
-    hello,
     leftBackToStand,
     leftBellyToStand,
-    rightBackToStand,
-    rightBellyToStand,
     wipe_forehead,
+    rightBellyToStand,
+    rightBackToStand,
 )
+from pid import PIDAgent
+from keyframes import hello
 
 
 class AngleInterpolationAgent(PIDAgent):
@@ -46,88 +46,109 @@ class AngleInterpolationAgent(PIDAgent):
 
     def think(self, perception):
         target_joints = self.angle_interpolation(self.keyframes, perception)
+        # Check if 'LHipYawPitch' exists in target_joints before copying to 'RHipYawPitch'
+        if "LHipYawPitch" in target_joints:
+            target_joints["RHipYawPitch"] = target_joints["LHipYawPitch"]
         self.target_joints.update(target_joints)
         return super(AngleInterpolationAgent, self).think(perception)
 
     def angle_interpolation(self, keyframes, perception):
-        target_joints = {}
+        joint_targets = {}
 
-        # Extract keyframe data
-        names, times, keys = keyframes
-        if not names:
-            return target_joints
+        # Extract keyframe components
+        joint_names, time_sequences, key_positions = keyframes
 
-        # Get current time
-        current_time = perception.time
+        # Early return for empty keyframes
+        if not time_sequences or not key_positions:
+            return joint_targets
 
-        # Iterate through each joint
-        for i, joint_name in enumerate(names):
-            joint_times = times[i]
-            joint_keys = keys[i]
+        # Determine maximum duration across all joints
+        try:
+            max_duration = max(max(seq) for seq in time_sequences)
+        except (TypeError, ValueError):
+            max_duration = max(time_sequences) if time_sequences else 0
 
-            # Skip if no keyframes for this joint
-            if not joint_times:
+        # Compute cyclic time within keyframe duration
+        current_time = perception.time % max_duration if max_duration > 0 else 0
+
+        # Process each joint's motion
+        for joint_idx, joint_name in enumerate(joint_names):
+            time_points = time_sequences[joint_idx]
+            position_keys = key_positions[joint_idx]
+
+            # Handle single keyframe case
+            if len(time_points) == 1:
+                joint_targets[joint_name] = (
+                    position_keys[0]
+                    if isinstance(position_keys[0], (int, float))
+                    else position_keys[0][0]
+                )
                 continue
 
-            # Check if motion is complete
-            if current_time > joint_times[-1]:
-                # Motion finished, set to final position
-                target_joints[joint_name] = joint_keys[-1][0]
-                continue
+            # Find appropriate time interval
+            for interval_idx in range(len(time_points) - 1):
+                start_time = time_points[interval_idx]
+                end_time = time_points[interval_idx + 1]
 
-            # Check if motion hasn't started
-            if current_time < joint_times[0]:
-                continue
+                if start_time <= current_time <= end_time:
+                    # Extract keyframe angles
+                    start_angle = (
+                        position_keys[interval_idx][0]
+                        if isinstance(position_keys[interval_idx], list)
+                        else position_keys[interval_idx]
+                    )
+                    end_angle = (
+                        position_keys[interval_idx + 1][0]
+                        if isinstance(position_keys[interval_idx + 1], list)
+                        else position_keys[interval_idx + 1]
+                    )
 
-            # Find the segment we're currently in
-            for j in range(len(joint_times) - 1):
-                t0 = joint_times[j]
-                t1 = joint_times[j + 1]
+                    # Determine Bezier control points
+                    if (
+                        isinstance(position_keys[interval_idx], list)
+                        and len(position_keys[interval_idx]) > 1
+                        and isinstance(position_keys[interval_idx + 1], list)
+                        and len(position_keys[interval_idx + 1]) > 2
+                    ):
 
-                if t0 <= current_time <= t1:
-                    # Get keyframe data
-                    key0 = joint_keys[j]
-                    key1 = joint_keys[j + 1]
+                        # Extract handle information
+                        _, _, handle1_angle = position_keys[interval_idx][1]
+                        _, _, handle2_angle = position_keys[interval_idx + 1][2]
 
-                    # Extract angles and handles
-                    angle0 = key0[0]
-                    angle1 = key1[0]
-
-                    # Extract Bezier handles if available
-                    if len(key0) > 1 and len(key1) > 1:
-                        # Handle2 of point 0 (outgoing handle)
-                        handle0 = key0[2]  # [interpolation_type, dTime, dAngle]
-                        # Handle1 of point 1 (incoming handle)
-                        handle1 = key1[1]  # [interpolation_type, dTime, dAngle]
-
-                        # Calculate control points for cubic Bezier
-                        p0 = angle0
-                        p3 = angle1
-                        p1 = angle0 + handle0[2]  # angle + dAngle
-                        p2 = angle1 + handle1[2]  # angle + dAngle
-
-                        # Normalize time parameter t to [0, 1]
-                        t = (current_time - t0) / (t1 - t0)
-
-                        # Cubic Bezier interpolation: B(t) = (1-t)³p0 + 3(1-t)²t*p1 + 3(1-t)t²*p2 + t³*p3
-                        interpolated_angle = (
-                            (1 - t) ** 3 * p0
-                            + 3 * (1 - t) ** 2 * t * p1
-                            + 3 * (1 - t) * t**2 * p2
-                            + t**3 * p3
-                        )
+                        # Calculate control points with enhanced curvature
+                        control1 = start_angle + 1.5 * handle1_angle
+                        control2 = end_angle + 1.5 * handle2_angle
                     else:
-                        # Linear interpolation fallback
-                        t = (current_time - t0) / (t1 - t0)
-                        interpolated_angle = angle0 + t * (angle1 - angle0)
+                        # Fallback control points for basic interpolation
+                        angle_span = end_angle - start_angle
+                        control1 = start_angle + 0.75 * angle_span
+                        control2 = end_angle - 0.75 * angle_span
 
-                    target_joints[joint_name] = interpolated_angle
-                    break
+                    # Compute normalized parameter
+                    interval_duration = end_time - start_time
+                    time_in_interval = current_time - start_time
+                    t_param = (
+                        time_in_interval / interval_duration
+                        if interval_duration > 0
+                        else 0
+                    )
 
-        return target_joints
+                    # Cubic Bezier interpolation formula
+                    angle_result = (
+                        (1 - t_param) ** 3 * start_angle
+                        + 3 * (1 - t_param) ** 2 * t_param * control1
+                        + 3 * (1 - t_param) * t_param**2 * control2
+                        + t_param**3 * end_angle
+                    )
+
+                    joint_targets[joint_name] = angle_result
+                    break  # Found the correct interval
+
+        return joint_targets
 
 
 if __name__ == "__main__":
     agent = AngleInterpolationAgent()
-    agent.keyframes = hello()  # CHANGE DIFFERENT KEYFRAMES
+    agent.keyframes = leftBackToStand()  # CHANGE DIFFERENT KEYFRAMES
+    # agent.keyframes = wipe_forehead()
     agent.run()

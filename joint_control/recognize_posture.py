@@ -10,19 +10,11 @@
 """
 
 from angle_interpolation import AngleInterpolationAgent
-from keyframes import (
-    hello,
-    leftBackToStand,
-    leftBellyToStand,
-    rightBackToStand,
-    rightBellyToStand,
-    wipe_forehead,
-)
+from keyframes import leftBellyToStand, rightBackToStand, leftBackToStand
+from keyframes import hello
 import pickle
-from os import listdir
-
-ROBOT_POSE_DATA_DIR = "robot_pose_data"
-ROBOT_POSE_CLF = "robot_pose.pkl"
+import numpy as np
+import os
 
 
 class PostureRecognitionAgent(AngleInterpolationAgent):
@@ -38,37 +30,57 @@ class PostureRecognitionAgent(AngleInterpolationAgent):
             simspark_ip, simspark_port, teamname, player_id, sync_mode
         )
         self.posture = "unknown"
-        self.posture_classifier = pickle.load(open(ROBOT_POSE_CLF, "rb"))
-        self.classes = listdir(ROBOT_POSE_DATA_DIR)
+        self.posture_classifier = self.load_classifier("robot_pose.pkl")
+
+    def load_classifier(self, filename):
+        current_dir = os.path.abspath(os.path.dirname(__file__))
+        file_path = os.path.join(current_dir, filename)
+
+        with open(file_path, "rb") as file:
+            classifier = pickle.load(file)
+        return classifier
 
     def think(self, perception):
         self.posture = self.recognize_posture(perception)
-        print(f"Recognized posture: {self.posture}")  # Add this line to see output
         return super(PostureRecognitionAgent, self).think(perception)
 
     def recognize_posture(self, perception):
         posture = "unknown"
-        # Extract features in the same order as training data
-        features = [
+        joint_angles = [
             perception.joint["LHipYawPitch"],
-            perception.joint["LHipRoll"],
             perception.joint["LHipPitch"],
+            perception.joint["LHipRoll"],
             perception.joint["LKneePitch"],
+            perception.joint["LShoulderPitch"],
             perception.joint["RHipYawPitch"],
-            perception.joint["RHipRoll"],
             perception.joint["RHipPitch"],
-            perception.joint["RKneePitch"],
-            perception.imu[0],  # AngleX
-            perception.imu[1],  # AngleY
+            perception.joint["RHipRoll"],
+            perception.imu[0],
+            perception.imu[1],
         ]
-        # Predict the class index
-        predicted_class = self.posture_classifier.predict([features])[0]
-        # Map to posture name
-        posture = self.classes[predicted_class]
+
+        input_data = np.array(joint_angles).reshape(1, -1)
+        predicted_class = self.posture_classifier.predict(input_data)[0]
+        classes = [
+            "HeadBack",
+            "Stand",
+            "Left",
+            "Sit",
+            "Back",
+            "StandInit",
+            "Right",
+            "Crouch",
+            "Belly",
+            "Frog",
+            "Knee",
+        ]
+
+        posture = classes[predicted_class]
+
         return posture
 
 
 if __name__ == "__main__":
     agent = PostureRecognitionAgent()
-    agent.keyframes = hello()  # CHANGE DIFFERENT KEYFRAMES
+    agent.keyframes = leftBackToStand()  # CHANGE DIFFERENT KEYFRAMES
     agent.run()

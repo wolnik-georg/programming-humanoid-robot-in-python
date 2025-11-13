@@ -11,7 +11,7 @@ from keyframes import (
     leftBellyToStand,
     rightBackToStand,
     rightBellyToStand,
-    bellyForwardToStand,
+    wipe_forehead,
 )
 
 
@@ -24,17 +24,13 @@ class StandingUpAgent(PostureRecognitionAgent):
         posture = self.posture
 
         if posture == "Back":
-            self.keyframes = bellyForwardToStand()
-        elif posture == "Belly":
-            self.keyframes = (
-                bellyForwardToStand()
-            )  # Use forward keyframe; could add side logic if needed
-        elif posture == "Left":
             self.keyframes = leftBackToStand()
-        elif posture == "Right":
+        elif posture == "Belly":
+            self.keyframes = rightBellyToStand()
+        elif posture == "Left":
             self.keyframes = rightBackToStand()
-        else:
-            self.keyframes = ([], [], [])  # Empty keyframes for unknown postures
+        elif posture == "Right":
+            self.keyframes = leftBackToStand()
 
 
 class TestStandingUpAgent(StandingUpAgent):
@@ -60,6 +56,7 @@ class TestStandingUpAgent(StandingUpAgent):
         time_now = perception.time
         if time_now - self.stiffness_on_off_time < self.stiffness_off_cycle:
             action.stiffness = {j: 0 for j in self.joint_names}  # turn off joints
+
         else:
             action.stiffness = {j: 1 for j in self.joint_names}  # turn on joints
         if (

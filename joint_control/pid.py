@@ -40,10 +40,10 @@ class PIDController(object):
         self.e1 = np.zeros(size)
         self.e2 = np.zeros(size)
         # ADJUST PARAMETERS BELOW
-        delay = 0
-        self.Kp = 5.0
-        self.Ki = 0.1
-        self.Kd = 0.1
+        delay = 2
+        self.Kp = 20.0
+        self.Ki = 0.2
+        self.Kd = 0.2
         self.y = deque(np.zeros(size), maxlen=delay + 1)
 
     def set_delay(self, delay):
@@ -53,27 +53,32 @@ class PIDController(object):
         self.y = deque(self.y, delay + 1)
 
     def control(self, target, sensor):
-        """apply PID control
+        """apply PID control with prediction
         @param target: reference values
         @param sensor: current values from sensor
         @return control signal
         """
-        # Predict next sensor using motor model
-        predicted = sensor + self.u * self.dt
-        self.y.append(predicted)  # Buffer the prediction
+        # Determine current position error
+        current_error = target - sensor
 
-        # Error based on predicted next position (for better control)
-        error = target - predicted
+        # Maintain prediction history for delay compensation
+        self.y.append(sensor + self.u * self.dt)
 
-        # Update integral and derivative
-        integral = (error + self.e1) * self.dt / 2
-        derivative = (error - self.e1) / self.dt
+        # Compute derivative component using error difference
+        derivative_component = self.Kd * (current_error - self.e1) / self.dt
 
-        # PID formula
-        self.u = self.Kp * error + self.Ki * integral + self.Kd * derivative
+        # Compute integral component using trapezoidal rule
+        integral_component = self.Ki * (self.e1 + current_error) * self.dt
 
-        self.e2 = self.e1.copy()
-        self.e1 = error.copy()
+        # Compute proportional component
+        proportional_component = self.Kp * current_error
+
+        # Combine PID components for control output
+        self.u = proportional_component + integral_component + derivative_component
+
+        # Shift error history for next iteration
+        self.e2 = self.e1
+        self.e1 = current_error
 
         return self.u
 
