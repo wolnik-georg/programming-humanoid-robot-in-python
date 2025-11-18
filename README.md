@@ -30,3 +30,7 @@ This repo is work in progress, please [sync git](https://help.github.com/article
 
 ## Demo in lecture
 The demo showed in lecture are included in this repo as well, please check files (mostly *.ipynb) in subfolders.
+
+
+LD_PRELOAD='/usr/lib/x86_64-linux-gnu/libstdc++.so.6' ./Linux.Simspark_v0.7.2-naoth-6.AppImage
+
